@@ -1230,9 +1230,22 @@ class TestOmniRequestTimeout:
 
         async def handler(reader, writer):
             # Drain the request but never respond — the original hang failure mode.
-            while True:
-                if not await reader.read(4096):
-                    break
+            try:
+                while await reader.read(4096):
+                    pass
+            except ConnectionResetError:
+                pass
+            finally:
+                # Close our side of the socket: the client aborts after the
+                # timeout and only sends FIN, so without writer.close() the
+                # half-closed connection keeps Server.wait_closed() (which on
+                # Python 3.12+ waits for every accepted connection to drop)
+                # blocked forever.
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except (ConnectionResetError, BrokenPipeError):
+                    pass
 
         monkeypatch.setattr(self._OVERRIDE, 1.0)
         server = await asyncio.start_server(handler, "127.0.0.1", 0)
