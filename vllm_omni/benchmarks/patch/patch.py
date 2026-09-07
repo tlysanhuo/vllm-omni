@@ -204,26 +204,31 @@ def _seed_tts_capture_pcm_for_wer() -> bool:
     )
 
 
-_OMNI_REQUEST_TIMEOUT_ENV = "OMNI_REQUEST_TIMEOUT_S"
 _DEFAULT_REQUEST_TIMEOUT_S = 900.0
 _LEGACY_REQUEST_TIMEOUT_S = 6 * 60 * 60.0
+
+# Set from the ``--omni-request-timeout-s`` CLI flag by ``vllm bench serve``
+# before the benchmark session is built (``None`` = use the default above).
+_REQUEST_TIMEOUT_OVERRIDE_S: float | None = None
+
+
+def set_request_timeout_s(value: float) -> None:
+    """Record the explicitly requested per-request timeout (from the CLI)."""
+    global _REQUEST_TIMEOUT_OVERRIDE_S
+    _REQUEST_TIMEOUT_OVERRIDE_S = float(value)
 
 
 def _omni_request_timeout_s() -> float:
     """Per-request total timeout for the shared benchmark ``aiohttp`` session.
 
-    ``OMNI_REQUEST_TIMEOUT_S`` (set by ``--omni-request-timeout-s``) overrides the
-    900 s default; a value ``<= 0`` restores the legacy 6 h cap. A bounded
-    per-request timeout makes a hung server surface as ``failed`` requests once
-    the deadline fires instead of pinning the benchmark slot indefinitely.
+    An explicit ``--omni-request-timeout-s`` value wins over the 900 s default;
+    ``<= 0`` restores the legacy 6 h cap. A bounded per-request timeout makes a
+    hung server surface as ``failed`` requests once the deadline fires instead
+    of pinning the benchmark slot indefinitely.
     """
-    raw = os.environ.get(_OMNI_REQUEST_TIMEOUT_ENV)
-    if raw is None or raw == "":
+    value = _REQUEST_TIMEOUT_OVERRIDE_S
+    if value is None:
         return _DEFAULT_REQUEST_TIMEOUT_S
-    try:
-        value = float(raw)
-    except ValueError as exc:
-        raise ValueError(f"{_OMNI_REQUEST_TIMEOUT_ENV} must be a number, got {raw!r}") from exc
     if value <= 0:
         return _LEGACY_REQUEST_TIMEOUT_S
     return value

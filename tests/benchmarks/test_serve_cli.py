@@ -365,7 +365,7 @@ def test_omni_request_timeout_s_flag_defaults_and_parses() -> None:
     add_omni_args(parser)
 
     args = parser.parse_args([])
-    assert args.omni_request_timeout_s == 900.0
+    assert args.omni_request_timeout_s is None
 
     args = parser.parse_args(["--omni-request-timeout-s", "0"])
     assert args.omni_request_timeout_s == 0.0
