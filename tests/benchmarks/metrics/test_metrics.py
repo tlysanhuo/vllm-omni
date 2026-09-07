@@ -142,9 +142,7 @@ def test_no_output_request_does_not_inflate_output_throughput():
     # All 10 healthy tokens (ttft 0.1 + nine 0.1s ITLs, last at ~1.0s) fall in
     # second bucket 0, so the healthy request alone peaks at 10 tokens/s.
     healthy_only = _calculate_test_metrics([healthy])
-    assert metrics.max_output_tokens_per_s == pytest.approx(
-        healthy_only.max_output_tokens_per_s
-    )
+    assert metrics.max_output_tokens_per_s == pytest.approx(healthy_only.max_output_tokens_per_s)
     assert metrics.max_output_tokens_per_s == pytest.approx(10.0)
 
 
