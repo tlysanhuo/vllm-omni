@@ -202,7 +202,13 @@ def _produced_no_output(output: RequestFuncOutput) -> bool:
     A 200 response whose stream closes without any text tokens, audio frames,
     or images carries no benchmark signal; counting it as completed lets a
     degraded run pass gates that only check request counts.
+
+    ``output_required=False`` is an explicit contract that no response is
+    expected (OmniInteract listen-only sessions with ``require_response=False``):
+    such sessions stay successful.
     """
+    if getattr(output, "output_required", None) is False:
+        return False
     has_text = bool(getattr(output, "output_tokens", 0)) or bool(getattr(output, "generated_text", ""))
     has_audio = (
         float(getattr(output, defs.AUDIO_FRAMES, 0.0) or 0.0) > 0
@@ -925,6 +931,11 @@ def calculate_metrics(
                 # response.created offset they cannot form a session-global
                 # token timeline, so do not publish a misleading peak rate.
                 token_timeline_available = False
+            elif _produced_no_output(output):
+                # Zero-output successes carry no tokens; keep their concurrency
+                # occupancy below, but exclude them from the token timeline so
+                # they cannot fabricate a peak rate.
+                pass
             else:
                 # Calculate token generation timestamp using
                 # start_time, ttft, and itl
