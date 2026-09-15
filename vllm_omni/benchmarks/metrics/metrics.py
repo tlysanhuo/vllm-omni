@@ -217,8 +217,8 @@ def _produced_no_output(output: RequestFuncOutput) -> bool:
     """A successful request must produce measurable output in some modality.
 
     A 200 response whose stream closes without any text tokens, audio frames,
-    or images carries no benchmark signal; counting it as completed lets a
-    degraded run pass gates that only check request counts.
+    images, or video units carries no benchmark signal; counting it as completed
+    lets a degraded run pass gates that only check request counts.
 
     ``output_required=False`` is an explicit contract that no response is
     expected (OmniInteract listen-only sessions with ``require_response=False``):
@@ -232,7 +232,13 @@ def _produced_no_output(output: RequestFuncOutput) -> bool:
         or float(getattr(output, defs.AUDIO_DURATION, 0.0) or 0.0) > 0
     )
     has_images = int(getattr(output, defs.IMAGE_COUNT, 0) or 0) > 0
-    return not (has_text or has_audio or has_images)
+    has_video = any(
+        int((info or {}).get(defs.OUTPUT_UNIT_COUNT) or 0) > 0
+        for info in (getattr(output, "stage_metrics", None) or {}).values()
+        if (info or {}).get("final_output_type") in {"video", "videos"}
+        or (info or {}).get("output_unit_type") == "video"
+    )
+    return not (has_text or has_audio or has_images or has_video)
 
 
 def print_metrics(

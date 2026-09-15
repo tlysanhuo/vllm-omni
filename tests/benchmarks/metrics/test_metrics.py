@@ -12,6 +12,7 @@ from vllm.benchmarks.serve import TaskType
 
 from vllm_omni.benchmarks.metrics.metrics import calculate_metrics
 from vllm_omni.benchmarks.patch.patch import MixRequestFuncOutput
+from vllm_omni.metrics import definitions as defs
 
 pytestmark = [pytest.mark.core_model, pytest.mark.benchmark, pytest.mark.cpu]
 
@@ -174,6 +175,40 @@ def test_required_output_contract_still_fails_empty_responses():
     required.output_required = True
 
     metrics = _calculate_test_metrics([required])
+
+    assert metrics.completed == 0
+    assert metrics.failed == 1
+
+
+def test_video_output_counts_as_completed():
+    video_only = _make_degraded_output()
+    video_only.stage_metrics = {
+        "2": {
+            "stage_name": "video_diffusion",
+            "final_output_type": "video",
+            "output_unit_type": "video",
+            defs.OUTPUT_UNIT_COUNT: 8,
+        }
+    }
+
+    metrics = _calculate_test_metrics([video_only])
+
+    assert metrics.completed == 1
+    assert metrics.failed == 0
+
+
+def test_video_stage_with_zero_units_still_counts_as_failed():
+    empty_video = _make_degraded_output()
+    empty_video.stage_metrics = {
+        "2": {
+            "stage_name": "video_diffusion",
+            "final_output_type": "video",
+            "output_unit_type": "video",
+            defs.OUTPUT_UNIT_COUNT: 0,
+        }
+    }
+
+    metrics = _calculate_test_metrics([empty_video])
 
     assert metrics.completed == 0
     assert metrics.failed == 1
