@@ -314,7 +314,14 @@ def _sanitize_nonfinite(value: Any) -> Any:
         return {key: _sanitize_nonfinite(item) for key, item in value.items()}
     if isinstance(value, list):
         return [_sanitize_nonfinite(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_sanitize_nonfinite(item) for item in value)
     return value
+
+
+def get_sanitized_data(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Sanitize benchmark records so the embedded report data stays strictly valid JSON."""
+    return [_sanitize_nonfinite(record) for record in records]
 
 
 def _build_html_document(
@@ -651,15 +658,11 @@ code {
 }
 """
 
-    omni_data_json = json.dumps(
-        [_sanitize_nonfinite(record) for record in omni_records],
-        ensure_ascii=False,
-        allow_nan=False,
-    )
+    # Records must arrive pre-sanitized via get_sanitized_data; allow_nan=False
+    # fails loudly here instead of silently emitting invalid JSON if a caller forgets.
+    omni_data_json = json.dumps(list(omni_records), ensure_ascii=False, allow_nan=False)
     diffusion_data_json = json.dumps(
-        [_sanitize_nonfinite(record) for record in diffusion_records],
-        ensure_ascii=False,
-        allow_nan=False,
+        list(diffusion_records), ensure_ascii=False, allow_nan=False
     )
     omni_cols_json = json.dumps(list(omni_columns), ensure_ascii=False)
     diffusion_cols_json = json.dumps(list(diffusion_columns), ensure_ascii=False)
@@ -1860,9 +1863,9 @@ def generate_html_report(input_dir: str, diffusion_input_dir: str, output_file: 
 
     html = _build_html_document(
         omni_columns=omni_columns,
-        omni_records=omni_records,
+        omni_records=get_sanitized_data(omni_records),
         diffusion_columns=diffusion_columns,
-        diffusion_records=diffusion_records,
+        diffusion_records=get_sanitized_data(diffusion_records),
     )
     _ensure_parent_dir(output_file)
     with open(output_file, "w", encoding="utf-8") as f:

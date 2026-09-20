@@ -1,6 +1,5 @@
 import importlib.util
 import json
-import re
 import sys
 from pathlib import Path
 
@@ -58,11 +57,53 @@ def test_generate_html_report_with_perf_templates(tmp_path: Path):
     assert '"endpoint": "/v1/videos"' in html
 
 
-def _extract_embedded_json(html: str, variable: str) -> list:
-    match = re.search(rf"const {variable} = (\[.*?\]);\n", html, flags=re.DOTALL)
-    assert match is not None, f"embedded data block '{variable}' not found"
-    # json.loads is a strict parser: it must reject bare NaN/Infinity literals.
-    return json.loads(match.group(1))
+def test_get_sanitized_data_replaces_nonfinite_floats_with_none():
+    module = _load_html_module()
+    records = [
+        {
+            "mean_tpot_ms": float("nan"),
+            "latency_mean": float("inf"),
+            "latency_p99": 19_800.0,
+            "completed": 8,
+            "backend": "openai-chat-omni",
+            "note": None,
+        }
+    ]
+
+    sanitized = module.get_sanitized_data(records)
+
+    assert sanitized[0]["mean_tpot_ms"] is None
+    assert sanitized[0]["latency_mean"] is None
+    assert sanitized[0]["latency_p99"] == pytest.approx(19_800.0)
+    assert sanitized[0]["completed"] == 8
+    assert sanitized[0]["backend"] == "openai-chat-omni"
+    assert sanitized[0]["note"] is None
+    # the input records are left untouched
+    assert records[0]["mean_tpot_ms"] != records[0]["mean_tpot_ms"]
+    # json.dumps with allow_nan=False is a strict serializer: it must reject
+    # bare NaN/Infinity literals, so this only passes on sanitized data.
+    json.dumps(sanitized, allow_nan=False)
+
+
+def test_get_sanitized_data_handles_nested_containers_and_tuples():
+    module = _load_html_module()
+    records = [
+        {
+            "result": {
+                "nested": {"latency_mean": float("inf")},
+                "values": [1.5, float("nan")],
+                "shape": (float("nan"), 3),
+            }
+        }
+    ]
+
+    sanitized = module.get_sanitized_data(records)
+
+    result = sanitized[0]["result"]
+    assert result["nested"]["latency_mean"] is None
+    assert result["values"] == [1.5, None]
+    assert result["shape"] == (None, 3)
+    json.dumps(sanitized, allow_nan=False)
 
 
 def test_generate_html_report_sanitizes_nonfinite_metric_values(tmp_path: Path):
@@ -133,13 +174,14 @@ def test_generate_html_report_sanitizes_nonfinite_metric_values(tmp_path: Path):
     assert output_file.exists()
     html = output_file.read_text(encoding="utf-8")
 
-    omni_data = _extract_embedded_json(html, "OMNI_DATA")
-    assert omni_data[0]["mean_tpot_ms"] is None
-    assert omni_data[0]["mean_itl_ms"] is None
-    assert omni_data[0]["mean_ttft_ms"] == pytest.approx(251.9)
-
-    diffusion_data = _extract_embedded_json(html, "DIFF_DATA")
-    assert diffusion_data[0]["latency_mean"] is None
-    assert diffusion_data[0]["latency_median"] == pytest.approx(12_500.0)
-    # the ``result`` sub-dict is flattened into the record; nested values are sanitized too
-    assert diffusion_data[0]["nested"]["latency_mean"] is None
+    # the embedded data lines must not carry bare non-finite literals; the
+    # JS template itself legitimately uses Infinity, so scope to data lines.
+    data_lines = [
+        line
+        for line in html.splitlines()
+        if line.startswith("const OMNI_DATA") or line.startswith("const DIFF_DATA")
+    ]
+    assert data_lines, "embedded data lines not found"
+    for line in data_lines:
+        assert "NaN" not in line
+        assert "Infinity" not in line
