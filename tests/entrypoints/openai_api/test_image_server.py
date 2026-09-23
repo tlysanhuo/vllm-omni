@@ -710,6 +710,48 @@ def test_multistage_images_async_omni_construction(async_omni_test_client):
     assert captured[1].guidance_scale == 6.5
 
 
+def test_multistage_images_generation_forwards_layers():
+    """Multi-stage /v1/images/generations must forward the requested layer count.
+
+    Regression: ``layers`` was missing from the hand-built ``extra_body``
+    while every sibling path forwarded it, so layered diffusion stages
+    silently ran at their default layer count.
+    """
+    captured: dict = {}
+
+    class _CapturingChatHandler:
+        async def generate_diffusion_images(self, *, prompt, extra_body, request_id, raw_request, arrival_time):
+            captured["extra_body"] = extra_body
+            return [Image.new("RGB", (8, 8), color="green")], None, None, None, None
+
+    app = FastAPI()
+    app.include_router(router)
+    app.state.openai_serving_chat = _CapturingChatHandler()
+    app.state.engine_client = SimpleNamespace(
+        stage_configs=[
+            SimpleNamespace(stage_type="llm"),
+            SimpleNamespace(stage_type="diffusion"),
+        ]
+    )
+    app.state.stage_configs = app.state.engine_client.stage_configs
+    app.state.args = Namespace(default_sampling_params=None, max_generated_image_size=1048576)
+
+    client = TestClient(app)
+
+    response = client.post(
+        "/v1/images/generations",
+        json={"prompt": "a cat", "layers": 4},
+    )
+    assert response.status_code == 200
+    assert captured["extra_body"]["layers"] == 4
+
+    # Without layers the key stays absent, leaving stage defaults untouched.
+    captured.clear()
+    response = client.post("/v1/images/generations", json={"prompt": "a cat"})
+    assert response.status_code == 200
+    assert "layers" not in captured["extra_body"]
+
+
 def test_generate_images_async_omni_glm_image_sets_stage0_max_tokens():
     """GLM-Image multistage: stage-0 gets target_h/w from requested size.
 
