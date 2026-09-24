@@ -661,9 +661,7 @@ code {
     # Records must arrive pre-sanitized via get_sanitized_data; allow_nan=False
     # fails loudly here instead of silently emitting invalid JSON if a caller forgets.
     omni_data_json = json.dumps(list(omni_records), ensure_ascii=False, allow_nan=False)
-    diffusion_data_json = json.dumps(
-        list(diffusion_records), ensure_ascii=False, allow_nan=False
-    )
+    diffusion_data_json = json.dumps(list(diffusion_records), ensure_ascii=False, allow_nan=False)
     omni_cols_json = json.dumps(list(omni_columns), ensure_ascii=False)
     diffusion_cols_json = json.dumps(list(diffusion_columns), ensure_ascii=False)
 

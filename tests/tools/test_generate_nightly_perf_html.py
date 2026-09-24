@@ -177,9 +177,7 @@ def test_generate_html_report_sanitizes_nonfinite_metric_values(tmp_path: Path):
     # the embedded data lines must not carry bare non-finite literals; the
     # JS template itself legitimately uses Infinity, so scope to data lines.
     data_lines = [
-        line
-        for line in html.splitlines()
-        if line.startswith("const OMNI_DATA") or line.startswith("const DIFF_DATA")
+        line for line in html.splitlines() if line.startswith("const OMNI_DATA") or line.startswith("const DIFF_DATA")
     ]
     assert data_lines, "embedded data lines not found"
     for line in data_lines:
