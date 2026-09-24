@@ -581,3 +581,52 @@ def test_text_encoder_tp_size_reaches_default_diffusion_parallel_config():
 
     parallel_config = stage_cfg["engine_args"]["parallel_config"]
     assert parallel_config["text_encoder_tp_size"] == 2
+
+
+# For https://github.com/vllm-project/vllm-omni/issues/8037
+DIFFUSION_PARALLEL_KNOBS = [
+    ("ulysses_degree", 4),
+    ("ulysses_mode", "advanced_uaa"),
+    ("ulysses_a2a_permute", True),
+    ("ring_degree", 2),
+    ("allgather_degree", 8),
+    ("use_hsdp", True),
+    ("hsdp_shard_size", 2048),
+    ("hsdp_replicate_size", 2),
+    ("cfg_parallel_size", 2),
+    ("vae_patch_parallel_size", 2),
+    ("vae_parallel_mode", "spatial_shard_height"),
+]
+
+
+@pytest.mark.parametrize("knob,value", DIFFUSION_PARALLEL_KNOBS)
+def test_from_cli_args_preserves_diffusion_parallel_knobs(knob, value):
+    """Each serve-CLI diffusion parallel knob must survive from_cli_args.
+
+    The field filter drops any namespace attribute the dataclass does not
+    declare, silently resetting the knob to its DiffusionParallelConfig
+    default.
+    """
+    engine_args = OmniEngineArgs.from_cli_args(SimpleNamespace(**{knob: value}))
+    assert getattr(engine_args, knob) == value
+
+
+@pytest.mark.parametrize("knob,value", DIFFUSION_PARALLEL_KNOBS)
+def test_diffusion_parallel_knobs_reach_default_diffusion_parallel_config(knob, value):
+    """Each preserved knob must land in DiffusionParallelConfig.
+
+    Mirrors the library flow: from_cli_args -> kwargs -> the generic
+    diffusion fallback, which resolves the field through
+    ``DiffusionParallelConfig.from_stage_overrides``.
+    """
+    from dataclasses import asdict
+
+    from vllm_omni.config.config_factory import StageConfigFactory
+
+    engine_args = OmniEngineArgs.from_cli_args(SimpleNamespace(**{knob: value}))
+    stage_cfg = StageConfigFactory.create_default_diffusion(
+        {k: v for k, v in asdict(engine_args).items() if v is not None},
+    )[0]
+
+    parallel_config = stage_cfg["engine_args"]["parallel_config"]
+    assert parallel_config[knob] == value
