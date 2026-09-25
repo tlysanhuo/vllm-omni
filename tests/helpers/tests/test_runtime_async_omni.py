@@ -121,3 +121,55 @@ def test_async_omni_params_defaults() -> None:
     assert params.model == "tiny/Qwen-Image"
     assert params.deploy_config is None
     assert params.extra_omni_kwargs is None
+
+
+def test_reap_is_scoped_to_the_current_process_tree(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A matching process outside this process tree must be left alone.
+
+    pytest-xdist loadgroup workers own sibling engines on a shared host;
+    the reap helper must only ever see this process's own children.
+    """
+    import os
+
+    from tests.helpers import clean as clean_mod
+
+    terminated: list[int] = []
+
+    class FakeProc:
+        def __init__(self, pid: int, cmdline: list[str]) -> None:
+            self.pid = pid
+            self._cmdline = cmdline
+
+        def cmdline(self) -> list[str]:
+            return self._cmdline
+
+        def name(self) -> str:
+            return "python"
+
+        def terminate(self) -> None:
+            terminated.append(self.pid)
+
+    child = FakeProc(101, ["python", "-m", "vllm-omni::engine"])
+    sibling = FakeProc(202, ["python", "-m", "vllm-omni::engine"])
+
+    class FakeRoot:
+        def children(self, recursive: bool = True) -> list[FakeProc]:
+            return [child]
+
+    class FakePsutil:
+        NoSuchProcess = clean_mod.psutil.NoSuchProcess
+        AccessDenied = clean_mod.psutil.AccessDenied
+
+        @staticmethod
+        def Process(pid: int) -> FakeRoot:
+            assert pid == os.getpid()
+            return FakeRoot()
+
+        @staticmethod
+        def wait_procs(procs: list, timeout: float | None = None) -> tuple[list, list]:
+            return list(procs), []
+
+    monkeypatch.setattr(clean_mod, "psutil", FakePsutil)
+    clean_mod.reap_leftover_engine_children()
+    assert terminated == [101]
+    assert not hasattr(sibling, "_terminated")

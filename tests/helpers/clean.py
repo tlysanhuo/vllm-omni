@@ -186,15 +186,22 @@ and vLLM-Omni engine entrypoints."""
 def reap_leftover_engine_children(
     keywords: tuple[str, ...] = LEFTOVER_ENGINE_PROCESS_KEYWORDS,
 ) -> None:
-    """Terminate engine child processes left over after an engine teardown.
+    """Terminate leftover engine child processes of THIS test process.
 
-    Shared by OmniRunner and AsyncOmniRunner so the keyword list stays in one
-    place. Best effort: missing or inaccessible processes are skipped, and
-    survivors of terminate() are killed before giving up.
+    Scoped to the current process tree: pytest-xdist workers on a shared
+    host own their engines, so a matching process outside our tree must
+    never be touched. Shared by OmniRunner and AsyncOmniRunner so the
+    keyword list stays in one place. Best effort: missing or inaccessible
+    processes are skipped, and survivors of terminate() are killed before
+    giving up.
     """
     try:
+        try:
+            candidates = psutil.Process(os.getpid()).children(recursive=True)
+        except psutil.NoSuchProcess:
+            return
         matched = []
-        for proc in psutil.process_iter(["pid", "name", "cmdline", "username"]):
+        for proc in candidates:
             try:
                 cmdline = " ".join(proc.cmdline()).lower() if proc.cmdline() else ""
                 name = proc.name().lower()
