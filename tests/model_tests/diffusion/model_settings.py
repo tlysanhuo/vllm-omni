@@ -1,4 +1,8 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
+
 from tests.model_tests.diffusion import diff_model_builders
+from tests.model_tests.diffusion.anima_builder import CHECKPOINT_FILENAME, real_anima_model, tiny_anima_builder
 from tests.model_tests.diffusion.config_types import (
     DiffusionAccs,
     DiffusionModelTestOpts,
@@ -29,6 +33,12 @@ from tests.model_tests.diffusion.config_types import (
 # $ pytest test_common_offline.py -k test_pipeline_on_supported_tasks[Flux2KleinPipeline
 #   ^ Runs all test groups for Flux2KleinPipeline only
 DIFFUSION_TEST_SETTINGS = {
+    "AnimaPipeline": DiffusionModelTestOpts(
+        model=real_anima_model,
+        builder=tiny_anima_builder,
+        supported_tasks=[DiffusionTasks.TEXT_TO_IMAGE],
+        checkpoint_filename=CHECKPOINT_FILENAME,
+    ),
     "Flux2KleinPipeline": DiffusionModelTestOpts(
         model="black-forest-labs/FLUX.2-klein-4B",
         builder=diff_model_builders.tiny_flux2_klein_builder,
@@ -125,6 +135,11 @@ DIFFUSION_TEST_SETTINGS = {
         model="black-forest-labs/FLUX.2-dev",
         builder=diff_model_builders.tiny_flux2_builder,
         supported_tasks=[DiffusionTasks.TEXT_TO_IMAGE],
+        extra_test_groups=[
+            [DiffusionAccs.CACHE_DIT, DiffusionAccs.LAYERWISE_OFFLOAD],
+            [DiffusionAccs.CFG_PARALLEL, DiffusionAccs.SEQUENCE_PARALLEL, DiffusionAccs.CPU_OFFLOAD],
+            [DiffusionAccs.TENSOR_PARALLEL, DiffusionAccs.VAE_PATCH_PARALLEL],
+        ],
     ),
     "QwenImageEditPipeline": DiffusionModelTestOpts(
         model="Qwen/Qwen-Image-Edit",
@@ -135,5 +150,14 @@ DIFFUSION_TEST_SETTINGS = {
         model="Qwen/Qwen-Image-Edit-2511",
         builder=diff_model_builders.tiny_qwen_image_edit_plus_builder,
         supported_tasks=[DiffusionTasks.IMAGE_TO_IMAGE],
+    ),
+    "StableDiffusion3Pipeline": DiffusionModelTestOpts(
+        model="stabilityai/stable-diffusion-3.5-medium",
+        builder=diff_model_builders.tiny_sd3_builder,
+        supported_tasks=[DiffusionTasks.TEXT_TO_IMAGE],
+        extra_test_groups=[
+            [DiffusionAccs.CACHE_DIT, DiffusionAccs.LAYERWISE_OFFLOAD],
+            [DiffusionAccs.CFG_PARALLEL, DiffusionAccs.TENSOR_PARALLEL, DiffusionAccs.CPU_OFFLOAD],
+        ],
     ),
 }
