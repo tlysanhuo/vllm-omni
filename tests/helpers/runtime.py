@@ -1129,10 +1129,14 @@ class AsyncOmniRunner:
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         engine = self.__dict__.get("engine")
-        if engine is not None and hasattr(engine, "shutdown"):
-            engine.shutdown()
-        reap_leftover_engine_children()
-        cleanup_test_environment()
+        try:
+            if engine is not None and hasattr(engine, "shutdown"):
+                engine.shutdown()
+        finally:
+            # A hung/failed shutdown is exactly the case leftover engine
+            # children exist for; reap and device cleanup must still run.
+            reap_leftover_engine_children()
+            cleanup_test_environment()
 
 
 def iter_async_omni(
@@ -1146,6 +1150,15 @@ def iter_async_omni(
     model_prefix = get_model_prefix()
     with omni_fixture_lock, _whisper_device_free_around():
         params: AsyncOmniParams = request.param
+        reserved = {"model", "deploy_config"}
+        overlap = reserved & (params.extra_omni_kwargs or {}).keys()
+        if overlap:
+            # These are rewritten per run level below; an extras entry would
+            # shadow the rewrite with a confusing constructor TypeError.
+            raise ValueError(
+                f"extra_omni_kwargs must not override reserved keys {sorted(overlap)}; "
+                "set AsyncOmniParams.model / .deploy_config instead."
+            )
         model = model_prefix + params.model
         deploy_config = stage_config_path_for_run_level(params.deploy_config, run_level)
         if run_level == "core_model" and request.node.get_closest_marker("diffusion"):
