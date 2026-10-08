@@ -127,6 +127,36 @@ jq -r '.choices[0].message.content[].image_url.url | split(",")[1]' response.jso
   done
 ```
 
+## FP8 quantization (stage 1)
+
+Stage 1 (the dominant DiT stage) supports online FP8 with no calibrated
+checkpoint — add one line to the stage-1 block of the deploy yaml (works
+in either layout; measured on the co-located 1x H100 config):
+
+```yaml
+  - stage_id: 1
+    quantization: fp8
+```
+
+Measured on 1x H100 80GB, co-located layout, 1024² / 12 steps / cfg 1.0 /
+seed 42, four prompts (the smoke prompt above plus three more), vLLM 0.31.0 /
+vLLM-Omni 099f9b553:
+
+| Metric | BF16 | stage-1 FP8 |
+|---|---|---|
+| Stage-1 latency (steady requests) | ~2.0 s | ~1.2 s |
+| Peak VRAM | 70.1 GiB | 64.3 GiB |
+
+Quality gate vs the BF16 outputs at the same seed (lossy by construction;
+SSIM / PSNR / LPIPS): 0.922 / 20.9 dB / 0.096 (botanical poster),
+0.941 / 22.9 dB / 0.073 (mountain lake), 0.816 / 18.9 dB / 0.124 (street
+market), 0.990 / 28.1 dB / 0.014 (minimal logo). Outputs stay coherent
+generations; complex scenes drift the most, simple graphics barely move.
+Server start pays one-time quantization plus compile (654 s vs 472 s for
+BF16 in the same session on a shared host). If a scene regresses further
+than acceptable, keep quality-sensitive linears in BF16 via
+`ignored_layers` (see the FP8 guide's `img_mlp` note).
+
 ## Notes
 
 - The default deployment keeps Stage 0 eager and enables dynamic regional
