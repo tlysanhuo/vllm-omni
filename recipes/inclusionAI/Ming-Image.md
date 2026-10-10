@@ -139,8 +139,18 @@ in either layout; measured on the co-located 1x H100 config):
 ```
 
 Measured on 1x H100 80GB, co-located layout, 1024² / 12 steps / cfg 1.0 /
-seed 42, four prompts (the smoke prompt above plus three more), vLLM 0.31.0 /
-vLLM-Omni 099f9b553:
+seed 42, checkpoint `Ming-Image-0.1-Design`, vLLM 0.31.0 / vLLM-Omni
+099f9b553. The environment block at the top of this recipe reflects the
+original 2x H100 validation; the numbers in this section come from the
+same stack as the 1x H100 co-location validation (#8612), which also
+updates the hardware line. Four prompts — the smoke prompt above plus:
+
+- "A serene mountain lake at sunrise with mist over the water"
+- "A vibrant street food market scene at night with neon signs"
+- "A minimalist coffee brand logo with a mountain silhouette"
+
+Quality metrics use 8-bit RGB (the checkpoint's alpha channel dropped),
+`data_range=255`:
 
 | Metric | BF16 | stage-1 FP8 |
 |---|---|---|
@@ -155,7 +165,8 @@ generations; complex scenes drift the most, simple graphics barely move.
 Server start pays one-time quantization plus compile (654 s vs 472 s for
 BF16 in the same session on a shared host). If a scene regresses further
 than acceptable, keep quality-sensitive linears in BF16 via
-`ignored_layers` (see the FP8 guide's `img_mlp` note).
+`ignored_layers` (see the `img_mlp` note in
+`docs/user_guide/quantization/fp8.md`).
 
 ## Notes
 
