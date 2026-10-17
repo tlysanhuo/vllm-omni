@@ -21,14 +21,17 @@ For Design-Layer, the first returned image is the reconstructed composite and th
 
 ## CUDA
 
-### Environment
+### Original two-GPU BF16 environment
 
 - OS: Linux
 - Python: 3.10+
 - CUDA: 13.0
 - vLLM version: 0.29.0
 - vLLM-Omni version or commit: 6daf5b30f
-- 2x H100 80GB (1xH100 to be validated)
+- 2x H100 80GB
+
+The single-GPU FP8 comparison below uses a newer, separately specified
+[environment](#fp8-quantization-stage-1-single-h100-observations).
 
 ### Commands
 
@@ -127,46 +130,89 @@ jq -r '.choices[0].message.content[].image_url.url | split(",")[1]' response.jso
   done
 ```
 
-## FP8 quantization (stage 1)
+## FP8 quantization (stage 1): single-H100 observations
 
-Stage 1 (the dominant DiT stage) supports online FP8 with no calibrated
-checkpoint — add one line to the stage-1 block of the deploy yaml (works
-in either layout; measured on the co-located 1x H100 config):
+The following historical comparison covers text-to-image generation with
+`inclusionAI/Ming-Image-0.1-Design` on one H100. It does not qualify FP8 for
+the two-GPU layout, image editing, or Design-Layer.
+
+### Comparison environment and deployment
+
+- GPU: 1x H100 80GB, with both stages on the same device.
+- Runtime: vLLM 0.31.0 and vLLM-Omni `099f9b553`.
+- CUDA: 13.0 through the forward-compatibility package on a driver-535 host.
+- Requests: one at a time, 1024x1024, 12 inference steps,
+  `guidance_scale=1.0`, and `seed=42` in both arms.
+
+Copy `vllm_omni/deploy/ming_image.yaml` to `ming_image_bf16.yaml` and apply
+the following overrides to its existing stage entries. Preserve the other
+fields, including `max_num_seqs: 1`, compilation settings, connectors, and
+sampling defaults.
 
 ```yaml
+stages:
+  - stage_id: 0
+    devices: "0"
+    gpu_memory_utilization: 0.60
   - stage_id: 1
-    quantization: fp8
+    devices: "0"
+    gpu_memory_utilization: 0.33
 ```
 
-Measured on 1x H100 80GB, co-located layout, 1024² / 12 steps / cfg 1.0 /
-seed 42, checkpoint `Ming-Image-0.1-Design`, vLLM 0.31.0 / vLLM-Omni
-099f9b553. The environment block at the top of this recipe reflects the
-original 2x H100 validation; the numbers in this section come from the
-same stack as the 1x H100 co-location validation (#8612), which also
-updates the hardware line. Four prompts — the smoke prompt above plus:
+Copy that configuration to `ming_image_fp8.yaml` and add
+`quantization: fp8` to its stage-1 entry only. This applies online FP8 to
+the DiT; no pre-quantized checkpoint is required. Keep stage 0 in BF16.
 
-- "A serene mountain lake at sunrise with mist over the water"
-- "A vibrant street food market scene at night with neon signs"
-- "A minimalist coffee brand logo with a mountain silhouette"
+Run the two configurations separately, stopping one server before starting
+the other:
 
-Quality metrics use 8-bit RGB (the checkpoint's alpha channel dropped),
-`data_range=255`:
+```bash
+vllm serve inclusionAI/Ming-Image-0.1-Design --omni \
+  --deploy-config ming_image_bf16.yaml --port 8091
+```
 
-| Metric | BF16 | stage-1 FP8 |
-|---|---|---|
+```bash
+vllm serve inclusionAI/Ming-Image-0.1-Design --omni \
+  --deploy-config ming_image_fp8.yaml --port 8091
+```
+
+Use the [text-to-image request](#text-to-image) for each prompt in the
+table below, saving BF16 and FP8 outputs separately. Warm up the requested
+shape before measuring steady-state latency.
+
+### Reported performance and image differences
+
+These are single-request observations from the environment above, not a
+throughput benchmark or a multi-run statistical comparison.
+
+| Metric | BF16 | Stage-1 FP8 |
+| --- | --- | --- |
 | Stage-1 latency (steady requests) | ~2.0 s | ~1.2 s |
 | Peak VRAM | 70.1 GiB | 64.3 GiB |
+| Server startup in the same session on a shared host | 472 s | 654 s |
 
-Quality gate vs the BF16 outputs at the same seed (lossy by construction;
-SSIM / PSNR / LPIPS): 0.922 / 20.9 dB / 0.096 (botanical poster),
-0.941 / 22.9 dB / 0.073 (mountain lake), 0.816 / 18.9 dB / 0.124 (street
-market), 0.990 / 28.1 dB / 0.014 (minimal logo). Outputs stay coherent
-generations; complex scenes drift the most, simple graphics barely move.
-Server start pays one-time quantization plus compile (654 s vs 472 s for
-BF16 in the same session on a shared host). If a scene regresses further
-than acceptable, keep quality-sensitive linears in BF16 via
-`ignored_layers` (see the `img_mlp` note in
-`docs/user_guide/quantization/fp8.md`).
+The image comparisons use the same prompt and seed in both arms. SSIM and
+PSNR were recorded on 8-bit RGB images with alpha dropped and
+`data_range=255`.
+
+| Exact prompt | SSIM vs BF16 | PSNR vs BF16 |
+| --- | --- | --- |
+| A clean editorial botanical poster | 0.922 | 20.9 dB |
+| A serene mountain lake at sunrise with mist over the water | 0.941 | 22.9 dB |
+| A vibrant street food market scene at night with neon signs | 0.816 | 18.9 dB |
+| A minimalist coffee brand logo with a mountain silhouette | 0.990 | 28.1 dB |
+
+These values describe observed differences; they are not minimum quality
+thresholds or a passing accuracy gate. LPIPS values are omitted because
+their original backbone and package version could not be verified.
+Establish quality thresholds for the intended workload before using FP8
+by default; this comparison does not establish them.
+
+If quality is insufficient, retain BF16 or test model-appropriate
+`ignored_layers` patterns as described in the
+[FP8 quantization guide](../../docs/user_guide/quantization/fp8.md#overview).
+Layer patterns are architecture-specific; the guide's `img_mlp` example
+is not a validated Ming-Image fallback from this comparison.
 
 ## Notes
 
